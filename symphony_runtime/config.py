@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -16,7 +17,11 @@ class SymphonyConfig:
 
     @classmethod
     def default(cls) -> "SymphonyConfig":
-        workspace_root = Path("/Users/neosan/.openclaw/workspace")
+        workspace_root_override = os.environ.get("SYMPHONY_WORKSPACE_ROOT")
+        if workspace_root_override:
+            workspace_root = Path(workspace_root_override).expanduser()
+        else:
+            workspace_root = Path.home() / ".openclaw" / "workspace"
         return cls(
             workspace_root=workspace_root,
             config_root=workspace_root / "config" / "symphony",
