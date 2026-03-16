@@ -1,0 +1,9 @@
+{
+  "projects": {
+    "mobile-core": {
+      "repo_key": "symphony",
+      "repo_path": "/absolute/path/to/your/local/checkout",
+      "base_branch": "main"
+    }
+  }
+}
