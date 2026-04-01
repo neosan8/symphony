@@ -33,6 +33,14 @@ class RunStatus(str, Enum):
 
 
 @dataclass(frozen=True)
+class ReviewerResult:
+    approved: bool
+    findings: list[str]
+    raw_output: str
+    iterations: int
+
+
+@dataclass(frozen=True)
 class ExecutionResult:
     issue_key: str
     run_root: Path

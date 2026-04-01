@@ -31,10 +31,11 @@ from symphony_runtime.linear_sync import (
     build_human_gate_rejected_comment,
     build_started_comment,
 )
-from symphony_runtime.models import ExecutionResult, LinearIssue, RunStatus
+from symphony_runtime.models import ExecutionResult, LinearIssue, ReviewerResult, RunStatus
 from symphony_runtime.preflight import run_preflight
 from symphony_runtime.repo_contract import load_repo_contract as load_repo_contract_file
 from symphony_runtime.repo_map import RepoMapping
+from symphony_runtime.reviewer import run_reviewer
 from symphony_runtime.run_store import (
     initialize_run_state,
     write_human_gate_decision,
@@ -44,6 +45,7 @@ from symphony_runtime.run_store import (
     write_pr_opened,
     write_pr_review_acknowledgement,
     write_pr_review_snapshot,
+    write_reviewer_snapshot,
     write_summary_artifacts,
 )
 from symphony_runtime.secret_requirements import check_required_secrets
@@ -539,17 +541,52 @@ class SymphonyRuntime:
         else:
             self.sync_started(issue.id, issue.identifier, prep["branch_name"])
             self.sync_status(issue.id, "In Progress")
-        execution = self.execute_prepared_run(
-            issue_key=issue.identifier,
-            run_root=prep["run_root"],
-            worktree_path=prep["worktree_path"],
-            branch_name=prep["branch_name"],
-            command=prep["command"],
-            preflight_ok=prep["preflight"].ok,
-        )
+
+        max_iterations = self.config.reviewer_max_iterations if self.config.reviewer_enabled else 1
+        reviewer_result: ReviewerResult | None = None
+
+        for iteration in range(1, max_iterations + 1):
+            execution = self.execute_prepared_run(
+                issue_key=issue.identifier,
+                run_root=prep["run_root"],
+                worktree_path=prep["worktree_path"],
+                branch_name=prep["branch_name"],
+                command=prep["command"],
+                preflight_ok=prep["preflight"].ok,
+            )
+
+            if not self.config.reviewer_enabled:
+                break
+
+            logs_root = prep["run_root"] / "logs"
+            logs_root.mkdir(parents=True, exist_ok=True)
+            reviewer_result = run_reviewer(
+                worktree_path=execution.worktree_path,
+                context_path=prep["run_root"] / "context.md",
+                stdout_path=logs_root / f"reviewer_{iteration}.log",
+                stderr_path=logs_root / f"reviewer_{iteration}_err.log",
+                model=self.config.reviewer_model,
+            )
+            reviewer_result = ReviewerResult(
+                approved=reviewer_result.approved,
+                findings=reviewer_result.findings,
+                raw_output=reviewer_result.raw_output,
+                iterations=iteration,
+            )
+            write_reviewer_snapshot(prep["run_root"], iteration, reviewer_result)
+
+            if reviewer_result.approved:
+                break
+
+            if iteration < max_iterations:
+                prep = self._inject_review_findings(prep, issue, reviewer_result.findings)
 
         verification = self._build_execution_verification(execution)
         review = self._build_execution_review(execution)
+        if reviewer_result is not None and not reviewer_result.approved:
+            review += "\n\nReviewer findings (unresolved after max iterations):\n"
+            for finding in reviewer_result.findings:
+                review += f"- BLOCKING: {finding}\n"
         summary = self._build_execution_summary(issue.title, execution.return_code)
         commit_sha = self._resolve_handoff_commit(execution.worktree_path)
         self.write_summary_for_execution(
@@ -826,3 +863,25 @@ class SymphonyRuntime:
             text=True,
         )
         return result.returncode == 0
+
+    @staticmethod
+    def _inject_review_findings(
+        prep: dict,
+        issue: LinearIssue,
+        findings: list[str],
+    ) -> dict:
+        """Re-write the context packet with review findings injected."""
+        context_path = prep["run_root"] / "context.md"
+        from .memory import search_memory  # noqa: PLC0415
+        memory_ctx = search_memory(f"{issue.title} {issue.description or ''}")
+        write_context_packet(
+            issue,
+            context_path,
+            selected_comments=[],
+            memory_context=memory_ctx,
+            review_findings=findings,
+        )
+        command = build_codex_command(prep["worktree_path"], context_path)
+        updated = dict(prep)
+        updated["command"] = command
+        return updated

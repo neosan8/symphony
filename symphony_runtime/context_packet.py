@@ -8,6 +8,7 @@ def write_context_packet(
     output_path: Path,
     selected_comments: list[str],
     memory_context: list[dict] | None = None,
+    review_findings: list[str] | None = None,
 ) -> None:
     lines = [
         f"# {issue.identifier}: {issue.title}",
@@ -21,6 +22,18 @@ def write_context_packet(
         "## Selected Comments",
         *[f"- {comment}" for comment in selected_comments],
     ]
+    if review_findings:
+        lines += [
+            "",
+            "## Previous Review Findings — Fix These",
+            "",
+            "The automated reviewer found these blocking issues in the previous iteration.",
+            "You MUST address all of them:",
+            "",
+        ]
+        for i, finding in enumerate(review_findings, 1):
+            lines.append(f"{i}. {finding}")
+
     if memory_context:
         lines += [
             "",

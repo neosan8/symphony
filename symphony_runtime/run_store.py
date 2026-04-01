@@ -495,6 +495,40 @@ def _write_human_gate_package(run_root: Path) -> None:
 
 
 
+def write_reviewer_snapshot(run_root: Path, iteration: int, reviewer_result) -> None:
+    """Persist reviewer result for a given iteration."""
+    run_root.mkdir(parents=True, exist_ok=True)
+    now = datetime.now(timezone.utc).isoformat()
+    reviewer_payload = {
+        "iteration": iteration,
+        "approved": reviewer_result.approved,
+        "findings": reviewer_result.findings,
+        "reviewed_at": now,
+    }
+    artifacts_dir = run_root / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    snapshot_path = artifacts_dir / f"reviewer_{iteration}.json"
+    snapshot_path.write_text(json.dumps(reviewer_payload, indent=2))
+
+    summary_payload = {
+        "approved": reviewer_result.approved,
+        "iterations": iteration,
+        "findings": reviewer_result.findings,
+    }
+    (run_root / "reviewer_summary.json").write_text(json.dumps(summary_payload, indent=2))
+
+    status_path = run_root / "status.json"
+    payload = json.loads(status_path.read_text()) if status_path.exists() else {}
+    payload["reviewer"] = {
+        "approved": reviewer_result.approved,
+        "iterations": iteration,
+        "findings_count": len(reviewer_result.findings),
+        "last_reviewed_at": now,
+    }
+    status_path.write_text(json.dumps(payload, indent=2))
+    update_run_state(run_root, payload)
+
+
 def write_human_gate_decision(
     run_root: Path,
     *,

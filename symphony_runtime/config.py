@@ -13,6 +13,9 @@ class SymphonyConfig:
     poll_interval_seconds: int = 30
     max_concurrency: int = 2
     max_repo_concurrency: int = 1
+    reviewer_enabled: bool = True
+    reviewer_max_iterations: int = 3
+    reviewer_model: str = "claude-sonnet-4-20250514"
 
     @classmethod
     def default(cls) -> "SymphonyConfig":
